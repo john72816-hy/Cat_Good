@@ -1,7 +1,7 @@
 {
   "name": "專業貓保母健康管理系統",
   "short_name": "貓保母",
-  "start_url": "./index.html",
+  "start_url": ".",
   "display": "standalone",
   "scope": "/"
   "background_color": "#FFF9F2",

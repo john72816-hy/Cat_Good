@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#FF9F43">
+<link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/620/620851.png">
+
+<script>
+    // 註冊 Service Worker
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('sw.js')
+                .then(reg => console.log('Service Worker 註冊成功', reg))
+                .catch(err => console.log('Service Worker 註冊失敗', err));
+        });
+    }
+</script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>專業貓保母 - 貓咪健康精準管理系統 (v3.1 動態選單版)</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --cat-primary: #FF9F43;
+            --cat-secondary: #FECA57;
+            --cat-bg: #FFF9F2;
+            --cat-dark: #576574;
+            --cat-border: #FFDCA9;
+            --cat-white: #ffffff;
+            --cat-blue: #54a0ff;
+            --cat-red: #ff6b6b;
+            --cat-green: #2ecc71;
+            --cat-purple: #9b59b6;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif, "Microsoft JhengHei";
+            background-color: var(--cat-bg);
+            color: var(--cat-dark);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container { max-width: 1100px; margin: 0 auto; }
+        
+        .header {
+            text-align: center;
+            padding: 20px;
+            border-bottom: 2px dashed var(--cat-primary);
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: var(--cat-white);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+            margin-bottom: 25px;
+            border: 1px solid var(--cat-border);
+        }
+
+        h2 { border-left: 5px solid var(--cat-primary); padding-left: 10px; margin-top: 0; }
+        h3 { color: var(--cat-dark); font-size: 1.1rem; }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        .grid-6 { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-sizing: border-box;
+            background-color: #fff;
+        }
+
+        button {
+            background: var(--cat-primary);
+            color: white;
+            border: none;
+            padding: 12px 18px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: 0.3s;
+        }
+
+        button:hover { opacity: 0.8; transform: translateY(-1px); }
+        .btn-outline { background: transparent; border: 1px solid var(--cat-primary); color: var(--cat-primary); }
+        .btn-export { background: var(--cat-green); }
+        .btn-import { background: var(--cat-purple); }
+        .btn-db-export { background: #3498db; }
+        .btn-db-import { background: #e67e22; }
+
+        /* 動態配餐列表專屬 Grid */
+        .meal-item-row {
+            display: grid;
+            grid-template-columns: 2.5fr 1.2fr 90px 100px 60px; 
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            background: #fdfdfd;
+            border-bottom: 1px solid #eee;
+        }
+        @media (max-width: 600px) {
+            .meal-item-row { grid-template-columns: 1fr; gap: 5px; }
+        }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+        th { background-color: #fff4e6; color: var(--cat-primary); }
+
+        .chart-container { position: relative; height: 250px; width: 100%; margin-bottom: 20px; }
+
+        .badge {
+            background: #e1f5fe;
+            color: #01579b;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+        }
+        .badge-water { background: #e3f2fd; color: #1565c0; }
+        .badge-foodwater { background: #e8f5e9; color: #2e7d32; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>🐾 專業貓保母健康管理系統 (動態選單升級版)</h1>
+        <p>
+            建議目標：<span id="targetKcalDisplay" style="color:var(--cat-red); font-weight:bold;">--</span> kcal | 
+            飲水目標：<span id="targetWaterDisplay" style="color:var(--cat-blue); font-weight:bold;">--</span> ml
+        </p>
+    </div>
+
+    <!-- 1. 需求評估 -->
+    <div class="card">
+        <h2>⚖️ 1. 需求評估</h2>
+        <div class="grid">
+            <div>
+                <label>貓咪體重 (kg)</label>
+                <input type="number" id="catWeight" step="0.1" placeholder="自動載入上次數值" oninput="calculateNeeds(true)">
+            </div>
+            <div>
+                <label>生理狀態</label>
+                <select id="catStatus" onchange="calculateNeeds(true)">
+                    <option value="1.2">結紮成年貓 (1.2x)</option>
+                    <option value="1.4">未結紮成年貓 (1.4x)</option>
+                    <option value="1.0">肥胖傾向 (1.0x)</option>
+                    <option value="0.8">減肥中 (0.8x)</option>
+                    <option value="2.5">幼貓 (2.5x)</option>
+                </select>
+            </div>
+            <div style="background: #fff4e6; padding: 10px; border-radius: 10px; text-align: center;">
+                <label>建議熱量</label>
+                <div id="derDisplay" style="font-size: 1.5rem; font-weight: bold; color: var(--cat-red);">-- kcal</div>
+            </div>
+            <div style="background: #e3f2fd; padding: 10px; border-radius: 10px; text-align: center;">
+                <label>建議飲水</label>
+                <div id="waterDisplay" style="font-size: 1.5rem; font-weight: bold; color: var(--cat-blue);">-- ml</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. 食物資料庫 -->
+    <div class="card">
+        <h2>🍱 2. 飼料/罐頭資料庫 (依品牌分類)</h2>
+        
+        <!-- 新增與備份區塊 -->
+        <div class="grid grid-6" style="margin-bottom: 10px; background: #fafafa; padding: 10px; border-radius: 8px;">
+            <input type="text" id="foodBrand" placeholder="品牌">
+            <input type="text" id="foodName" placeholder="品名">
+            <input type="number" id="foodKcal" placeholder="kcal/100g">
+            <input type="number" id="foodMoisture" step="0.1" placeholder="水分比例(%)">
+            <input type="number" id="foodCa" step="0.01" placeholder="鈣(%)">
+            <input type="number" id="foodP" step="0.01" placeholder="磷(%)">
+            <button onclick="addFood()" style="grid-column: span 2; margin-top: 5px;">➕ 新增食糧</button>
+        </div>
+        
+        <!-- 品牌篩選下拉選單 -->
+        <h3 style="margin-top: 20px;">🔍 資料庫查詢</h3>
+        <div class="grid">
+            <select id="dbBrandFilter" onchange="renderFoodDatabase()" style="border-color: var(--cat-primary);">
+                <option value="">-- 請先選擇要檢視的品牌 --</option>
+                <!-- 動態載入品牌 -->
+            </select>
+        </div>
+
+        <div style="overflow-x: auto;">
+            <table id="foodTable">
+                <thead>
+                    <tr><th>品牌</th><th>品名</th><th>熱量/100g</th><th>水分(%)</th><th>鈣磷比</th><th>操作</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="6" style="text-align: center; color: #999;">請從上方選單選擇品牌以顯示內容</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="grid" style="margin-top: 15px;">
+            <button onclick="exportFoodDB()" class="btn-db-export">📤 匯出資料庫</button>
+            <button onclick="document.getElementById('importFoodFile').click()" class="btn-db-import">📥 匯入資料庫</button>
+            <input type="file" id="importFoodFile" style="display:none;" onchange="importFoodDB(event)">
+        </div>
+    </div>
+
+    <!-- 3. 配餐計算 -->
+    <div class="card">
+        <h2>🥣 3. 今日配餐與精準計算</h2>
+        
+        <!-- 動態選單加入配餐 -->
+        <div class="grid" style="background: #fff4e6; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+            <select id="mealFoodSelect" style="border-color: var(--cat-primary);">
+                <option value="">-- 從資料庫選擇要餵食的食糧 --</option>
+                <!-- 動態載入分類選單 -->
+            </select>
+            <button onclick="addMealItem()">📥 加入今日清單</button>
+        </div>
+
+        <div class="meal-item-row" style="background:#eee; font-weight:bold; border-radius:8px 8px 0 0;">
+            <div>食糧名稱 (品牌/品名)</div><div>熱量/水分基準</div><div>餵食量(g)</div><div>貓咪喜好</div><div>操作</div>
+        </div>
+        
+        <!-- 存放加入的清單 -->
+        <div id="feedingList" style="border: 1px solid #eee; border-top:none; border-radius: 0 0 8px 8px; margin-bottom:15px; min-height: 50px;">
+            <!-- 動態加入的項目 -->
+        </div>
+
+        <div class="grid">
+            <button onclick="calculateManualTotal()">手動加總計算</button>
+            <button onclick="autoDistributeWeight()" class="btn-outline">✨ 自動配比 (均分熱量)</button>
+        </div>
+        
+        <div id="feedingSummary" style="padding: 15px; border-radius: 8px; background: #fff4e6; text-align: center; line-height:1.6; margin-top: 15px;">
+            熱量進度：<strong id="totalConsumedKcal">0</strong> / <span id="targetKcalDisplay2">0</span> kcal <span id="kcalStatus"></span><br>
+            <span style="color:var(--cat-blue);">💧 來自食物的水分估算：<strong id="foodWaterEstim">0</strong> ml</span>
+        </div>
+    </div>
+
+    <!-- 4. 健康紀錄日誌 -->
+    <div class="card">
+        <h2>📅 4. 健康紀錄日誌</h2>
+        <div class="grid">
+            <div><label>時間</label><input type="datetime-local" id="logDateTime"></div>
+            <div><label>今日體重(kg)</label><input type="number" id="logWeight" step="0.1"></div>
+            <div><label>額外喝水量(ml)</label><input type="number" id="logWater" placeholder="貓咪自己喝的水量"></div>
+            <div><label>備註</label><input type="text" id="logNote" placeholder="如：食慾佳"></div>
+        </div>
+        <div class="grid">
+            <button onclick="saveDailyLog()" style="background:#2ecc71;">💾 儲存今日總結紀錄</button>
+            <button onclick="exportData()" class="btn-export">📤 匯出日誌紀錄</button>
+            <button onclick="document.getElementById('importFile').click()" class="btn-import">📥 匯入日誌紀錄</button>
+            <input type="file" id="importFile" style="display:none;" onchange="importData(event)">
+        </div>
+        
+        <h3 style="font-size: 1rem; margin-top: 20px;">📋 歷史日誌紀錄</h3>
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr><th>時間</th><th>體重</th><th>總飲水(額外+食物)</th><th>熱量</th><th>內容細節</th><th>操作</th></tr>
+                </thead>
+                <tbody id="historyLogBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 5. 健康趨勢分析 -->
+    <div class="card">
+        <h2>📈 5. 健康趨勢分析</h2>
+        <h3 style="color: var(--cat-primary);">🔸 體重趨勢 (kg)</h3>
+        <div class="chart-container"><canvas id="weightChart"></canvas></div>
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 30px 0;">
+        <h3 style="color: var(--cat-blue);">🔹 總飲水量趨勢 (ml)</h3>
+        <div class="chart-container"><canvas id="waterChart"></canvas></div>
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 30px 0;">
+        <h3 style="color: var(--cat-red);">🔺 熱量攝取趨勢 (kcal)</h3>
+        <div class="chart-container"><canvas id="kcalChart"></canvas></div>
+    </div>
+</div>
+
+<script>
+    let foodDatabase = JSON.parse(localStorage.getItem('catFoodDB_v3')) || [];
+    let healthLogs = JSON.parse(localStorage.getItem('catHealthLogs_v3')) || [];
+    let lastWeight = localStorage.getItem('lastCatWeight') || ""; 
+    let targetDER = 0;
+    let targetWater = 0;
+    
+    let chartWeight, chartWater, chartKcal;
+
+    window.onload = () => {
+        const now = new Date();
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        document.getElementById('logDateTime').value = now.toISOString().slice(0, 16);
+
+        if(lastWeight) {
+            document.getElementById('catWeight').value = lastWeight;
+            calculateNeeds(false);
+        }
+
+        // 相容舊資料
+        foodDatabase = foodDatabase.map(f => ({...f, moisture: f.moisture || 0}));
+
+        updateDropdowns(); // 更新選單
+        renderFoodDatabase();
+        renderLogHistory();
+        initCharts();
+    };
+
+    function calculateNeeds(shouldSave) {
+        const w = parseFloat(document.getElementById('catWeight').value);
+        const f = parseFloat(document.getElementById('catStatus').value);
+        if (isNaN(w) || w <= 0) return;
+
+        if(shouldSave) localStorage.setItem('lastCatWeight', w);
+
+        targetDER = Math.round(70 * Math.pow(w, 0.75) * f);
+        targetWater = Math.round(w * 50);
+
+        document.getElementById('derDisplay').innerText = targetDER + " kcal";
+        document.getElementById('waterDisplay').innerText = targetWater + " ml";
+        document.getElementById('targetKcalDisplay').innerText = targetDER;
+        document.getElementById('targetKcalDisplay2').innerText = targetDER;
+        document.getElementById('targetWaterDisplay').innerText = targetWater;
+    }
+
+    // --- 資料庫與選單同步更新 ---
+    function updateDropdowns() {
+        const brands = [...new Set(foodDatabase.map(f => f.brand))].sort();
+        
+        // 1. 更新資料庫的品牌查詢選單
+        const dbFilter = document.getElementById('dbBrandFilter');
+        const currentDbFilter = dbFilter.value;
+        let dbHtml = '<option value="">-- 請先選擇要檢視的品牌 --</option>';
+        brands.forEach(b => {
+            dbHtml += `<option value="${b}">${b}</option>`;
+        });
+        dbFilter.innerHTML = dbHtml;
+        dbFilter.value = currentDbFilter; // 保留原本選的狀態
+
+        // 2. 更新配餐下拉選單 (使用 optgroup 分類)
+        const mealSelect = document.getElementById('mealFoodSelect');
+        let mealHtml = '<option value="">-- 從資料庫選擇要餵食的食糧 --</option>';
+        brands.forEach(brand => {
+            mealHtml += `<optgroup label="📦 品牌：${brand}">`;
+            foodDatabase.filter(f => f.brand === brand).forEach(f => {
+                mealHtml += `<option value="${f.id}">${f.name}</option>`;
+            });
+            mealHtml += `</optgroup>`;
+        });
+        mealSelect.innerHTML = mealHtml;
+    }
+
+    function addFood() {
+        const brand = document.getElementById('foodBrand').value.trim();
+        const name = document.getElementById('foodName').value.trim();
+        const kcal = parseFloat(document.getElementById('foodKcal').value);
+        const moisture = parseFloat(document.getElementById('foodMoisture').value) || 0; 
+        const ca = parseFloat(document.getElementById('foodCa').value) || 0;
+        const p = parseFloat(document.getElementById('foodP').value) || 0;
+
+        if (!brand || !name || isNaN(kcal)) return alert("請至少填寫品牌、品名與熱量！");
+
+        const ratio = (p > 0) ? (ca / p).toFixed(2) : "--";
+        foodDatabase.push({ id: Date.now(), brand, name, kcal, moisture, ca, p, ratio });
+        
+        // 清空輸入框
+        document.getElementById('foodName').value = '';
+        document.getElementById('foodKcal').value = '';
+        document.getElementById('foodMoisture').value = '';
+        document.getElementById('foodCa').value = '';
+        document.getElementById('foodP').value = '';
+
+        saveAndRenderFood();
+        alert("食糧新增成功！");
+    }
+
+    function saveAndRenderFood() {
+        localStorage.setItem('catFoodDB_v3', JSON.stringify(foodDatabase));
+        updateDropdowns(); // 每次存取都要更新選單
+        renderFoodDatabase();
+    }
+
+    function renderFoodDatabase() {
+        const filter = document.getElementById('dbBrandFilter').value;
+        const tbody = document.querySelector('#foodTable tbody');
+        tbody.innerHTML = '';
+        
+        if (!filter) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#999;">請從上方選單選擇品牌以顯示內容</td></tr>';
+            return;
+        }
+
+        const filteredData = foodDatabase.filter(f => f.brand === filter);
+        if (filteredData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#999;">此品牌尚無資料</td></tr>';
+            return;
+        }
+
+        filteredData.forEach(item => {
+            const mText = item.moisture > 0 ? `${item.moisture}%` : '--';
+            tbody.innerHTML += `
+                <tr>
+                    <td>${item.brand}</td><td>${item.name}</td><td>${item.kcal} kcal</td>
+                    <td>${mText}</td><td>${item.ratio}:1</td>
+                    <td><button onclick="deleteFood(${item.id})" style="padding:4px 8px; background:#ff7675;">刪除</button></td>
+                </tr>`;
+        });
+    }
+
+    function deleteFood(id) {
+        if(!confirm("確定要刪除這筆資料庫項目嗎？")) return;
+        foodDatabase = foodDatabase.filter(f => f.id !== id);
+        
+        // 如果該項目還在今日清單上，一併移除
+        const row = document.getElementById(`meal-row-${id}`);
+        if(row) removeMealItem(id);
+
+        saveAndRenderFood();
+    }
+
+    // --- 資料庫匯出匯入 ---
+    function exportFoodDB() {
+        if(foodDatabase.length === 0) return alert("無資料可匯出");
+        const blob = new Blob([JSON.stringify(foodDatabase)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = `cat_food_database_${new Date().toLocaleDateString()}.json`;
+        a.click();
+    }
+
+    function importFoodDB(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const imported = JSON.parse(e.target.result);
+                if(Array.isArray(imported)) {
+                    foodDatabase = imported.map(f => ({...f, moisture: f.moisture || 0}));
+                    saveAndRenderFood();
+                    alert("食糧資料庫匯入成功！");
+                }
+            } catch (err) { alert("匯入失敗，解析錯誤"); }
+        };
+        reader.readAsText(file);
+        event.target.value = '';
+    }
+
+    // --- 動態配餐與計算 ---
+    function addMealItem() {
+        const foodId = document.getElementById('mealFoodSelect').value;
+        if (!foodId) return alert("請先從下拉選單選擇食糧！");
+        
+        if (document.querySelector(`.food-weight-input[data-id="${foodId}"]`)) {
+            return alert("此食糧已經在今日的配餐清單中囉！");
+        }
+
+        const item = foodDatabase.find(f => f.id == foodId);
+        if(!item) return;
+
+        const mText = item.moisture > 0 ? `水:${item.moisture}%` : '無紀錄';
+        
+        const row = document.createElement('div');
+        row.className = 'meal-item-row';
+        row.id = `meal-row-${item.id}`;
+        row.innerHTML = `
+            <div style="font-size:0.9rem;"><strong>${item.brand}</strong><br><span style="color:#666;">${item.name}</span></div>
+            <div style="font-size:0.8rem; color:#888;">${item.kcal} kcal<br>${mText}</div>
+            <input type="number" class="food-weight-input" placeholder="克(g)" data-id="${item.id}" data-kcal="${item.kcal}" data-moisture="${item.moisture}" data-name="${item.brand}-${item.name}" oninput="calculateManualTotal()">
+            <select class="food-preference" data-id="${item.id}" onchange="calculateManualTotal()">
+                <option value="非常喜歡">😻 喜歡</option>
+                <option value="普通" selected>😐 普通</option>
+                <option value="不太吃">😿 不吃</option>
+            </select>
+            <button onclick="removeMealItem(${item.id})" style="background:#ff7675; padding:8px;">移除</button>
+        `;
+        
+        document.getElementById('feedingList').appendChild(row);
+        calculateManualTotal();
+    }
+
+    function removeMealItem(id) {
+        const row = document.getElementById(`meal-row-${id}`);
+        if(row) {
+            row.remove();
+            calculateManualTotal();
+        }
+    }
+
+    function calculateManualTotal() {
+        let totalKcal = 0;
+        let totalFoodWater = 0;
+        let details = [];
+        
+        const inputs = document.querySelectorAll('.food-weight-input');
+        
+        inputs.forEach(input => {
+            const weight = parseFloat(input.value) || 0;
+            const kcalPer100 = parseFloat(input.dataset.kcal);
+            const moisturePct = parseFloat(input.dataset.moisture) || 0;
+            const name = input.dataset.name;
+            const pref = document.querySelector(`.food-preference[data-id="${input.dataset.id}"]`).value;
+            
+            const itemKcal = (kcalPer100 / 100) * weight;
+            const itemWater = weight * (moisturePct / 100);
+
+            totalKcal += itemKcal;
+            totalFoodWater += itemWater;
+
+            if (weight > 0) {
+                let waterStr = itemWater > 0 ? `水${itemWater.toFixed(1)}` : '無水';
+                details.push(`${name}(${weight}g/${waterStr}/${pref})`);
+            }
+        });
+
+        document.getElementById('totalConsumedKcal').innerText = Math.round(totalKcal);
+        document.getElementById('foodWaterEstim').innerText = totalFoodWater.toFixed(1);
+
+        let kcalBadge = "";
+        if(targetDER > 0) {
+            kcalBadge = totalKcal > targetDER ? "⚠️ 超標" : (totalKcal < targetDER * 0.9 ? "📉 不足" : "✅ 完美");
+        }
+        document.getElementById('kcalStatus').innerHTML = kcalBadge;
+
+        return { totalKcal: Math.round(totalKcal), totalFoodWater: parseFloat(totalFoodWater.toFixed(1)), details: details.join('；') };
+    }
+
+    function autoDistributeWeight() {
+        if (targetDER <= 0) return alert("請先於上方填寫體重與狀態");
+        const inputs = document.querySelectorAll('.food-weight-input');
+        if (inputs.length === 0) return alert("請先加入至少一項食糧到配餐清單");
+        
+        const kcalEach = targetDER / inputs.length;
+        inputs.forEach(input => {
+            const kcalPer100 = parseFloat(input.dataset.kcal);
+            input.value = (kcalEach / (kcalPer100 / 100)).toFixed(1);
+        });
+        calculateManualTotal();
+    }
+
+    function saveDailyLog() {
+        const { totalKcal, totalFoodWater, details } = calculateManualTotal();
+        const weight = document.getElementById('logWeight').value;
+        const directWater = parseFloat(document.getElementById('logWater').value) || 0;
+        const dt = document.getElementById('logDateTime').value;
+        const note = document.getElementById('logNote').value;
+
+        if (!weight) return alert("請填寫今日體重！");
+        if (details === '' && totalKcal === 0 && directWater === 0) {
+            if(!confirm("今天沒有餵食或喝水紀錄，確定要儲存嗎？")) return;
+        }
+
+        const totalWater = Math.round(directWater + totalFoodWater);
+
+        const log = { 
+            id: Date.now(), dateTime: dt, weight: parseFloat(weight), 
+            directWater: directWater, foodWater: totalFoodWater, totalWater: totalWater,
+            kcal: totalKcal, details, note, targetDER, targetWater 
+        };
+        
+        healthLogs.unshift(log);
+        localStorage.setItem('catHealthLogs_v3', JSON.stringify(healthLogs));
+        renderLogHistory();
+        updateCharts();
+        
+        // 儲存後清空配餐列表方便隔日輸入
+        document.getElementById('feedingList').innerHTML = '';
+        calculateManualTotal();
+        document.getElementById('logWater').value = '';
+        document.getElementById('logNote').value = '';
+        
+        alert(`紀錄成功！今日總飲水量：${totalWater} ml`);
+    }
+
+    function renderLogHistory() {
+        const tbody = document.getElementById('historyLogBody');
+        tbody.innerHTML = '';
+        healthLogs.forEach(log => {
+            const tw = log.totalWater !== undefined ? log.totalWater : log.water;
+            const dw = log.directWater || 0;
+            const fw = log.foodWater || 0;
+
+            tbody.innerHTML += `
+                <tr>
+                    <td>${log.dateTime.replace('T', ' ')}</td>
+                    <td>${log.weight} kg</td>
+                    <td>
+                        <strong>${tw} ml</strong><br>
+                        <span class="badge badge-water">喝:${dw}</span>
+                        <span class="badge badge-foodwater">食:${fw}</span>
+                    </td>
+                    <td><span class="badge">${log.kcal} kcal</span></td>
+                    <td><small>${log.details || '無餵食紀錄'}</small><br><span style="color:#888;">${log.note || ''}</span></td>
+                    <td><button onclick="deleteLog(${log.id})" style="background:gray; color:white; border:none; padding:4px 8px; cursor:pointer;">刪除</button></td>
+                </tr>`;
+        });
+    }
+
+    function deleteLog(id) {
+        if(!confirm("確定要刪除這筆紀錄嗎？")) return;
+        healthLogs = healthLogs.filter(l => l.id !== id);
+        localStorage.setItem('catHealthLogs_v3', JSON.stringify(healthLogs));
+        renderLogHistory();
+        updateCharts();
+    }
+
+    // --- 圖表 ---
+    function initCharts() {
+        const sortedLogs = [...healthLogs].sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
+        const labels = sortedLogs.map(l => l.dateTime.split('T')[0]);
+
+        const ctxWeight = document.getElementById('weightChart').getContext('2d');
+        chartWeight = new Chart(ctxWeight, {
+            type: 'line',
+            data: { labels: labels, datasets: [{ label: '實測體重 (kg)', data: sortedLogs.map(l => l.weight), borderColor: 'var(--cat-primary)', tension: 0.3 }] },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+
+        const ctxWater = document.getElementById('waterChart').getContext('2d');
+        chartWater = new Chart(ctxWater, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    { label: '總飲水量 (額外+食物)', data: sortedLogs.map(l => l.totalWater !== undefined ? l.totalWater : l.water), borderColor: 'var(--cat-blue)', backgroundColor: 'rgba(84, 160, 255, 0.1)', fill: true, tension: 0.3 },
+                    { label: '建議飲水量', data: sortedLogs.map(l => l.targetWater), borderColor: 'var(--cat-blue)', borderDash: [5, 5], pointRadius: 0 }
+                ]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+
+        const ctxKcal = document.getElementById('kcalChart').getContext('2d');
+        chartKcal = new Chart(ctxKcal, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    { label: '實測熱量 (kcal)', data: sortedLogs.map(l => l.kcal), borderColor: 'var(--cat-red)', tension: 0.3 },
+                    { label: '建議熱量', data: sortedLogs.map(l => l.targetDER), borderColor: 'var(--cat-red)', borderDash: [5, 5], pointRadius: 0 }
+                ]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+    }
+
+    function updateCharts() {
+        const sortedLogs = [...healthLogs].sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
+        const labels = sortedLogs.map(l => l.dateTime.split('T')[0]);
+
+        chartWeight.data.labels = labels;
+        chartWeight.data.datasets[0].data = sortedLogs.map(l => l.weight);
+        chartWeight.update();
+
+        chartWater.data.labels = labels;
+        chartWater.data.datasets[0].data = sortedLogs.map(l => l.totalWater !== undefined ? l.totalWater : l.water);
+        chartWater.data.datasets[1].data = sortedLogs.map(l => l.targetWater);
+        chartWater.update();
+
+        chartKcal.data.labels = labels;
+        chartKcal.data.datasets[0].data = sortedLogs.map(l => l.kcal);
+        chartKcal.data.datasets[1].data = sortedLogs.map(l => l.targetDER);
+        chartKcal.update();
+    }
+
+    function exportData() {
+        const data = { healthLogs, lastWeight: localStorage.getItem('lastCatWeight') };
+        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = `cat_healthLogs_${new Date().toLocaleDateString()}.json`;
+        a.click();
+    }
+
+    function importData(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const imported = JSON.parse(e.target.result);
+                healthLogs = imported.healthLogs || [];
+                if(imported.lastWeight) localStorage.setItem('lastCatWeight', imported.lastWeight);
+                localStorage.setItem('catHealthLogs_v3', JSON.stringify(healthLogs));
+                location.reload();
+            } catch (err) { alert("匯入失敗，格式錯誤"); }
+        };
+        reader.readAsText(file);
+    }
+</script>
+
+</body>
+</html>
